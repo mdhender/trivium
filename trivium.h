@@ -6,8 +6,8 @@
  * once you have done that, you may use Twiddle to encrypt/decrypt data.
  */
 struct TMdh_Trivium_State {
-	unsigned char t[  3]; /* t0 .. t2   */
-	unsigned char s[288]; /* s0 .. s287 */
+  unsigned char t[  3]; /* t0 .. t2   */
+  unsigned char s[288]; /* s0 .. s287 */
 };
 typedef struct TMdh_Trivium_State TriviumState;
 
@@ -44,12 +44,13 @@ typedef struct TMdh_Trivium_Buffer TriviumBuffer;
 /*------------------------------------------------------------------------
  * Usage:
  *    Populate a Key.
- *    Use the Key to create an 80 bit KeyHash.
+ *    Use the Key to initialize an 80 bit KeyHash.
  *    Use the KeyHash to create a State.
  *    Use the State and a Buffer to encrypt/decrypt data.
  */
 TriviumKeyHash *Trivium_KeyHash(TriviumKeyHash *tkh, TriviumKey *tk);
 TriviumState   *Trivium_Init(TriviumState *ts, TriviumKeyHash *tkh);
+unsigned char   Trivium_StirState(TriviumState *state);
 TriviumBuffer  *Trivium_TwiddleBuffer(TriviumState *ts, TriviumBuffer *tb);
 unsigned char   Trivium_TwiddleByte(TriviumState *ts, unsigned char b);
 
