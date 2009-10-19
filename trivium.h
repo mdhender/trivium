@@ -51,7 +51,6 @@ typedef struct TMdh_Trivium_Buffer TriviumBuffer;
 TriviumKeyHash *Trivium_KeyHash(TriviumKeyHash *tkh, TriviumKey *tk);
 TriviumState   *Trivium_Init(TriviumState *ts, TriviumKeyHash *tkh);
 unsigned char   Trivium_StirState(TriviumState *state);
-TriviumBuffer  *Trivium_TwiddleBuffer(TriviumState *ts, TriviumBuffer *tb);
-unsigned char   Trivium_TwiddleByte(TriviumState *ts, unsigned char b);
+void            Trivium_TwiddleBuffer(TriviumState *ts, TriviumBuffer *tb);
 
 #endif  /* TMdh_Trivium_H */

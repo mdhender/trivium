@@ -1,21 +1,18 @@
 #include "trivium.h"
 
-TriviumBuffer *
+void
 Trivium_TwiddleBuffer(TriviumState *state, TriviumBuffer *tb)
 {
-  if (state && tb && tb->src) {
-    int srcLength = tb->srcLength;
+  int srcLength = tb->srcLength;
 
-    unsigned char *src = tb->src;
-    unsigned char *dst = tb->dst ? tb->dst : tb->src;
+  unsigned char *src = tb->src;
+  unsigned char *dst = tb->dst ? tb->dst : tb->src;
 
-    /* use the key stream to twiddle the buffer */
-    for (; srcLength > 0; srcLength--) {
-
-      /* twiddle the source byte using the key stream */
-      *(dst++) = *(src++) ^ Trivium_StirState(state);
-    }
+  /* use the key stream to twiddle the buffer */
+  for (; srcLength > 0; srcLength--) {
+    /*
+     * twiddle the source byte using the PRNG stream
+     */
+    *(dst++) = *(src++) ^ Trivium_StirState(state);
   }
-
-  return tb;
 }
