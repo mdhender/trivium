@@ -45,7 +45,9 @@ func loadVectors(t *testing.T) []*vector {
 	var (
 		vectors []*vector
 		cur     *vector
-		field   *[]byte // the field that continuation lines append to
+		// appendTo extends the field that hex continuation lines belong
+		// to, or is nil when the previous line started no such field.
+		appendTo func([]byte)
 	)
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
@@ -53,7 +55,7 @@ func loadVectors(t *testing.T) []*vector {
 		if m := vectorRE.FindStringSubmatch(line); m != nil {
 			cur = &vector{name: "set" + m[1] + "/vector" + m[2]}
 			vectors = append(vectors, cur)
-			field = nil
+			appendTo = nil
 			continue
 		}
 		if cur == nil {
@@ -61,26 +63,28 @@ func loadVectors(t *testing.T) []*vector {
 		}
 		if m := fieldRE.FindStringSubmatch(line); m != nil {
 			b := mustHex(t, m[4])
+			v := cur
 			switch {
 			case m[1] == "key":
-				cur.key, field = b, nil
+				v.key, appendTo = b, nil
 			case m[1] == "IV":
-				cur.iv, field = b, nil
+				v.iv, appendTo = b, nil
 			case m[1] == "xor-digest":
-				cur.xorDigest = b
-				field = &cur.xorDigest
+				v.xorDigest = b
+				appendTo = func(more []byte) { v.xorDigest = append(v.xorDigest, more...) }
 			default:
 				off, _ := strconv.Atoi(m[2])
-				cur.samples = append(cur.samples, sample{offset: off, want: b})
-				field = &cur.samples[len(cur.samples)-1].want
+				v.samples = append(v.samples, sample{offset: off, want: b})
+				i := len(v.samples) - 1
+				appendTo = func(more []byte) { v.samples[i].want = append(v.samples[i].want, more...) }
 			}
 			continue
 		}
-		if field != nil && hexRE.MatchString(line) {
-			*field = append(*field, mustHex(t, line)...)
+		if appendTo != nil && hexRE.MatchString(line) {
+			appendTo(mustHex(t, line))
 			continue
 		}
-		field = nil
+		appendTo = nil
 	}
 	if err := sc.Err(); err != nil {
 		t.Fatal(err)
@@ -147,12 +151,24 @@ func TestVectors(t *testing.T) {
 
 // reference is a direct, bit-at-a-time transcription of the Trivium
 // specification, used to cross-check the 64-rounds-at-a-time implementation.
+// It decodes key and iv itself rather than calling specBit, so that a bit
+// ordering mistake in the package is not shared with the reference.
 func reference(key, iv []byte, n int) []byte {
-	var s [289]byte // s[1] through s[288]; s[0] is unused
-	for i := range 80 {
-		s[1+i] = specBit(key, i)
-		s[94+i] = specBit(iv, i)
+	// bits returns the 80 spec bits X1..X80 of a 10-byte key or IV, where X1
+	// is the most significant bit of the last byte.
+	bits := func(b []byte) []byte {
+		var out []byte
+		for _, x := range slices.Backward(b) {
+			for shift := 7; shift >= 0; shift-- {
+				out = append(out, x>>shift&1)
+			}
+		}
+		return out
 	}
+
+	var s [289]byte // s[1] through s[288]; s[0] is unused
+	copy(s[1:], bits(key))
+	copy(s[94:], bits(iv))
 	s[286], s[287], s[288] = 1, 1, 1
 
 	round := func() byte {
@@ -310,6 +326,21 @@ func TestErrorStrings(t *testing.T) {
 	if got := IVSizeError(4).Error(); got != "trivium: invalid IV size 4" {
 		t.Errorf("IVSizeError: %q", got)
 	}
+}
+
+func TestReset(t *testing.T) {
+	c, _ := New(mustHex(t, "0123456789ABCDEF0123"), mustHex(t, "FEDCBA9876543210FEDC"))
+	c.XORKeyStream(make([]byte, 3), make([]byte, 3)) // leave buffered keystream
+	c.Reset()
+	if c.a != (register{}) || c.b != (register{}) || c.c != (register{}) || c.buf != [bufSize]byte{} {
+		t.Fatal("Reset left state behind")
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("XORKeyStream after Reset did not panic")
+		}
+	}()
+	c.XORKeyStream(make([]byte, 1), make([]byte, 1))
 }
 
 func TestPanics(t *testing.T) {

@@ -32,17 +32,33 @@ func (k IVSizeError) Error() string {
 // Cipher is an instance of the Trivium stream cipher. It implements
 // cipher.Stream.
 //
-// A Cipher is not safe for concurrent use by multiple goroutines.
+// A Cipher is not safe for concurrent use by multiple goroutines. It must not
+// be copied after first use: a copy continues the same keystream as the
+// original, which reuses keystream just as reusing a key and IV pair would.
 type Cipher struct {
+	_ noCopy
+
 	// The three shift registers, A (s1..s93), B (s94..s177) and
 	// C (s178..s288). See register for the bit layout.
 	a, b, c register
 
 	// buf holds keystream bytes generated but not yet consumed;
 	// buf[off:] is still available.
-	buf [8]byte
+	buf [bufSize]byte
 	off int
+
+	// wiped is set by Reset; a wiped Cipher refuses to produce keystream.
+	wiped bool
 }
+
+// bufSize is the number of keystream bytes produced by each call to next.
+const bufSize = 8
+
+// noCopy lets go vet's copylocks check flag copies of a Cipher.
+type noCopy struct{}
+
+func (*noCopy) Lock()   {}
+func (*noCopy) Unlock() {}
 
 var _ cipher.Stream = (*Cipher)(nil)
 
@@ -62,7 +78,7 @@ func New(key, iv []byte) (*Cipher, error) {
 		return nil, IVSizeError(len(iv))
 	}
 
-	c := &Cipher{off: len(Cipher{}.buf)}
+	c := &Cipher{off: bufSize}
 
 	// (s1, ..., s93)    <- (K1, ..., K80, 0, ..., 0)
 	// (s94, ..., s177)  <- (IV1, ..., IV80, 0, ..., 0)
@@ -85,6 +101,16 @@ func New(key, iv []byte) (*Cipher, error) {
 	return c, nil
 }
 
+// Reset zeroes the cipher's internal state, including any buffered
+// keystream, so that key-dependent material does not linger in memory.
+// After Reset, the Cipher cannot be used again: XORKeyStream panics.
+func (c *Cipher) Reset() {
+	c.a, c.b, c.c = register{}, register{}, register{}
+	clear(c.buf[:])
+	c.off = bufSize
+	c.wiped = true
+}
+
 // specBit returns bit i+1 of the spec's numbering (K1..K80 or IV1..IV80)
 // from a 10-byte key or IV in eSTREAM byte order.
 func specBit(b []byte, i int) byte {
@@ -99,6 +125,9 @@ func specBit(b []byte, i int) byte {
 // least len(src). Successive calls continue the keystream where the previous
 // call stopped.
 func (c *Cipher) XORKeyStream(dst, src []byte) {
+	if c.wiped {
+		panic("trivium: use of Cipher after Reset")
+	}
 	if len(dst) < len(src) {
 		panic("trivium: output smaller than input")
 	}
@@ -108,8 +137,8 @@ func (c *Cipher) XORKeyStream(dst, src []byte) {
 	}
 
 	// Drain any keystream left over from a previous call.
-	if c.off < len(c.buf) {
-		n := min(len(src), len(c.buf)-c.off)
+	if c.off < bufSize {
+		n := min(len(src), bufSize-c.off)
 		for i := range n {
 			dst[i] = src[i] ^ c.buf[c.off+i]
 		}
@@ -150,7 +179,9 @@ func (c *Cipher) XORKeyStream(dst, src []byte) {
 //	(s94, s95, ..., s177) <- (t1, s94, ..., s176)
 //	(s178, s179, ..., s288) <- (t2, s178, ..., s287)
 //
-// Every tap sits at least 65 bits into its register, so none of the next 64
+// Every tap is at 0-based position 65 or deeper in its register (the
+// shallowest are s66 and s243), while the 64 rounds write only positions 0
+// through 63. So none of the next 64
 // rounds reads a bit written by an earlier one of those rounds. That lets
 // all 64 rounds be computed at once, one round per bit of a uint64.
 func (c *Cipher) next() uint64 {
@@ -191,7 +222,7 @@ func (r *register) set(p int, v byte) {
 
 // taps returns a word whose bit j is the bit at position p as seen by round
 // j of the next 64 rounds, that is, the bit currently at position p-j.
-// p must be in [64, 127).
+// p must be in [64, 127), so that every bit read predates the 64 rounds.
 func (r *register) taps(p int) uint64 {
 	s := uint(127 - p)
 	return r.lo>>s | r.hi<<(64-s)

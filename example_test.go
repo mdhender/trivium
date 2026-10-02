@@ -48,12 +48,18 @@ func Example_randomIV() {
 	packet := make([]byte, trivium.IVSize+len(message))
 	iv := packet[:trivium.IVSize]
 	rand.Read(iv)
-	c, _ := trivium.New(key, iv)
+	c, err := trivium.New(key, iv)
+	if err != nil {
+		panic(err)
+	}
 	c.XORKeyStream(packet[trivium.IVSize:], message)
 
 	// Receiver: split off the IV and decrypt the rest in place.
 	iv, body := packet[:trivium.IVSize], packet[trivium.IVSize:]
-	c, _ = trivium.New(key, iv)
+	c, err = trivium.New(key, iv)
+	if err != nil {
+		panic(err)
+	}
 	c.XORKeyStream(body, body)
 
 	fmt.Printf("%s\n", body)
@@ -65,14 +71,20 @@ func Example_streamWriter() {
 	key, _ := hex.DecodeString("0123456789abcdef0123")
 	iv, _ := hex.DecodeString("fedcba9876543210fedc")
 
-	c, _ := trivium.New(key, iv)
+	enc, err := trivium.New(key, iv)
+	if err != nil {
+		panic(err)
+	}
 	var ciphertext bytes.Buffer
-	w := cipher.StreamWriter{S: c, W: &ciphertext}
+	w := cipher.StreamWriter{S: enc, W: &ciphertext}
 	io.WriteString(w, "streamed ")
 	io.WriteString(w, "plaintext\n")
 
-	c, _ = trivium.New(key, iv)
-	r := cipher.StreamReader{S: c, R: &ciphertext}
+	dec, err := trivium.New(key, iv)
+	if err != nil {
+		panic(err)
+	}
+	r := cipher.StreamReader{S: dec, R: &ciphertext}
 	io.Copy(os.Stdout, r)
 	// Output: streamed plaintext
 }
@@ -83,7 +95,10 @@ func ExampleCipher_XORKeyStream() {
 	key, _ := hex.DecodeString("80000000000000000000")
 	iv := make([]byte, trivium.IVSize)
 
-	c, _ := trivium.New(key, iv)
+	c, err := trivium.New(key, iv)
+	if err != nil {
+		panic(err)
+	}
 	keystream := make([]byte, 16)
 	c.XORKeyStream(keystream, keystream)
 
